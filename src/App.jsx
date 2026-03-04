@@ -66,7 +66,7 @@ const GrainFilter = () => (
 
 // --- UTILITIES ---
 // Для Render: укажите URL вашего бекенда в переменной окружения VITE_API_URL
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://backend-5xtp.onrender.com';
 
 const getHeaders = () => {
   return {
@@ -83,7 +83,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isPro, setIsPro] = useState(false);
   // ВНИМАНИЕ: Замените 'YOUR_TELEGRAM_ID' на ваш реальный ID из Telegram, чтобы только вы видели админку
-  const ADMIN_IDS = [123456789, 987654321]; // Сюда можно добавить список ID админов
+  const ADMIN_IDS = [6782438597]; // Сюда можно добавить список ID админов
   const [isAdmin, setIsAdmin] = useState(false);
   const [starsBalance, setStarsBalance] = useState(150);
   const [hasJoinedChannel, setHasJoinedChannel] = useState(false);
