@@ -25,27 +25,8 @@ const CANCELATION_LINKS = {
   'iCloud': 'https://support.apple.com/en-us/HT202039',
 };
 
-// --- MOCK DATA ДЛЯ АДМИНКИ ---
-const MOCK_USERS = [
-  { id: 1, name: 'Ivan Ivanov', username: '@ivan_dev', status: 'Pro', joined: '2026-02-15', avatar: 'bg-indigo-500' },
-  { id: 2, name: 'Alice Smith', username: '@alice_s', status: 'Free', joined: '2026-02-20', avatar: 'bg-pink-500' },
-  { id: 3, name: 'Sergey Petrov', username: '@sergep', status: 'Pro', joined: '2026-02-28', avatar: 'bg-green-500' },
-  { id: 4, name: 'Elena Kor', username: '@el_kor', status: 'Free', joined: '2026-03-01', avatar: 'bg-yellow-500' },
-];
-
-const ADMIN_STATS = {
-  totalRevenue: 12450,
-  activeUsers: 1420,
-  proUsers: 342,
-  avgSpend: 42.50,
-  predictedRevenue: 15800
-};
-
-const INITIAL_AUDIT_LOG = [
-  { id: 1, action: 'Ivan Ivanvov joined Pro', time: '2 mins ago', type: 'subscription' },
-  { id: 2, action: 'System updated to v2.4', time: '1 hour ago', type: 'system' },
-  { id: 3, action: 'New broadcast sent', time: '3 hours ago', type: 'admin' },
-];
+// --- ПОДТЯГИВАЕТСЯ ИЗ БАЗЫ ДАННЫХ ---
+const INITIAL_AUDIT_LOG = [];
 
 // --- ВСПОМОГАТЕЛЬНЫЕ КОМПОНЕНТЫ ---
 const StarsDisplay = ({ balance }) => (
@@ -86,46 +67,11 @@ const GrainFilter = () => (
 // --- UTILITIES ---
 const API_BASE = 'http://localhost:3001/api/v1';
 
-const cloud = {
-  get: async (key) => {
-    try {
-      // For Demo: Use localStorage if no backend is specified
-      // In Production: Always use backend
-      const initData = window.Telegram?.WebApp?.initData || '';
-      const response = await fetch(`${API_BASE}/user/init`, {
-        headers: { 'x-telegram-init-data': initData }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (key === 'user_subscriptions') return JSON.stringify(data.subscriptions);
-        if (key === 'is_pro') return data.isPro.toString();
-        if (key === 'stars_balance') return data.starsBalance.toString();
-        return null;
-      }
-    } catch (e) {
-      console.warn("Backend not available, falling back to localStorage");
-    }
-    return localStorage.getItem(key);
-  },
-  set: async (key, value) => {
-    localStorage.setItem(key, value);
-    if (key === 'user_subscriptions') {
-      try {
-        const initData = window.Telegram?.WebApp?.initData || '';
-        await fetch(`${API_BASE}/user/subs`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-telegram-init-data': initData
-          },
-          body: JSON.stringify({ subs: JSON.parse(value) })
-        });
-      } catch (e) {
-        console.warn("Failed to sync with backend");
-      }
-    }
-    return true;
-  }
+const getHeaders = () => {
+  return {
+    'Content-Type': 'application/json',
+    'x-telegram-init-data': window.Telegram?.WebApp?.initData || ''
+  };
 };
 
 export default function App() {
@@ -144,6 +90,8 @@ export default function App() {
   const [showLimitModal, setShowLimitModal] = useState(false);
 
   // Advanced Admin States
+  const [adminStats, setAdminStats] = useState({ totalRevenue: 0, activeUsers: 0, proUsers: 0, avgSpend: 0, predictedRevenue: 0 });
+  const [adminUsers, setAdminUsers] = useState([]);
   const [auditLog, setAuditLog] = useState(INITIAL_AUDIT_LOG);
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [activeBroadcast, setActiveBroadcast] = useState(null);
@@ -168,38 +116,27 @@ export default function App() {
 
   useEffect(() => {
     const loadData = async () => {
-      const savedSubs = await cloud.get('user_subscriptions');
-      // Если подписок в базе нет или они пустые - оставляем пустой INITIAL_SUBS ([])
-      if (savedSubs && savedSubs !== '[]') {
-        try {
-          setSubs(JSON.parse(savedSubs));
-        } catch (e) {
-          console.error("Failed to parse subs", e);
+      try {
+        const res = await fetch(`${API_BASE}/user/init`, { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          setSubs(data.subscriptions || []);
+          setIsPro(data.isPro);
+          setStarsBalance(data.starsBalance || 0);
+          if (data.proExpiration) setProExpiration(data.proExpiration);
+
+          if (data.role === 'admin' || data.user?.id === 123456789) {
+            setIsAdmin(true);
+          }
         }
-      }
 
-      const savedPro = await cloud.get('is_pro');
-      if (savedPro === 'true') setIsPro(true);
-
-      const savedStars = await cloud.get('stars_balance');
-      if (savedStars) setStarsBalance(parseInt(savedStars));
-
-      const savedJoined = await cloud.get('has_joined_channel');
-      if (savedJoined === 'true') setHasJoinedChannel(true);
-
-      const savedExp = await cloud.get('pro_expiration');
-      if (savedExp) setProExpiration(savedExp);
-
-      const savedBroadcast = await cloud.get('active_broadcast');
-      if (savedBroadcast) setActiveBroadcast(JSON.parse(savedBroadcast));
-
-      const savedPromoCodes = await cloud.get('promo_codes');
-      if (savedPromoCodes) setPromoCodes(JSON.parse(savedPromoCodes));
-
-      // Проверка на админа (по TG ID)
-      const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
-      if (user && ADMIN_IDS.includes(user.id)) {
-        setIsAdmin(true);
+        const bRes = await fetch(`${API_BASE}/broadcast`, { headers: getHeaders() });
+        if (bRes.ok) {
+          const bData = await bRes.json();
+          if (bData.broadcast) setActiveBroadcast(bData.broadcast);
+        }
+      } catch (e) {
+        console.error('Failed to load initial data:', e);
       }
     };
 
@@ -210,34 +147,56 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Сохранение в облако при изменении
+  // Sync state changes back
   useEffect(() => {
-    cloud.set('user_subscriptions', JSON.stringify(subs));
+    if (subs !== INITIAL_SUBS) {
+      fetch(`${API_BASE}/user/subs`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ subs })
+      }).catch(e => console.warn(e));
+    }
   }, [subs]);
 
   useEffect(() => {
-    cloud.set('is_pro', isPro.toString());
-  }, [isPro]);
+    if (isPro || starsBalance !== 150 || proExpiration) {
+      fetch(`${API_BASE}/user/update`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ isPro, starsBalance, proExpiration })
+      }).catch(e => console.warn(e));
+    }
+  }, [isPro, starsBalance, proExpiration]);
 
   useEffect(() => {
-    cloud.set('stars_balance', starsBalance.toString());
-  }, [starsBalance]);
+    if (activeScreen === 'admin' && isAdmin) {
+      const fetchAdminData = async () => {
+        try {
+          const stats = await fetch(`${API_BASE}/admin/stats`, { headers: getHeaders() }).then(r => r.json());
+          const users = await fetch(`${API_BASE}/admin/users`, { headers: getHeaders() }).then(r => r.json());
+          const audits = await fetch(`${API_BASE}/admin/audit`, { headers: getHeaders() }).then(r => r.json());
+          const promos = await fetch(`${API_BASE}/admin/promo`, { headers: getHeaders() }).then(r => r.json());
 
-  useEffect(() => {
-    cloud.set('has_joined_channel', hasJoinedChannel.toString());
-  }, [hasJoinedChannel]);
-
-  useEffect(() => {
-    if (proExpiration) cloud.set('pro_expiration', proExpiration);
-  }, [proExpiration]);
-
-  useEffect(() => {
-    cloud.set('promo_codes', JSON.stringify(promoCodes));
-  }, [promoCodes]);
+          setAdminStats(stats);
+          setAdminUsers(users);
+          setAuditLog(audits);
+          setPromoCodes(promos);
+        } catch (e) {
+          console.error(e);
+        }
+      };
+      fetchAdminData();
+    }
+  }, [activeScreen, isAdmin]);
 
   const addAuditLog = (action, type = 'user') => {
     const newEntry = { id: Date.now(), action, time: 'Just now', type };
-    setAuditLog([newEntry, ...auditLog.slice(0, 9)]);
+    setAuditLog(prev => [newEntry, ...prev.slice(0, 9)]);
+    fetch(`${API_BASE}/user/audit`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ action, type })
+    }).catch(e => console.warn(e));
   };
 
   const isActuallyPro = isPro || (proExpiration && new Date(proExpiration) > new Date());
@@ -317,73 +276,65 @@ export default function App() {
     navigate('dashboard');
   };
 
-  const handleSendBroadcast = () => {
+  const handleSendBroadcast = async () => {
     if (!broadcastMessage.trim()) return;
-    const broadcast = {
-      id: Date.now(),
-      text: broadcastMessage,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-    setActiveBroadcast(broadcast);
-    cloud.set('active_broadcast', JSON.stringify(broadcast));
-    addAuditLog(`Global broadcast sent: ${broadcastMessage.substring(0, 20)}...`, 'admin');
-    setBroadcastMessage('');
-    window.Telegram.WebApp.showAlert("Broadcast message sent to all users! 📩");
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      await fetch(`${API_BASE}/admin/broadcast`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ text: broadcastMessage, time })
+      });
+      setActiveBroadcast({ id: Date.now(), text: broadcastMessage, time });
+      setBroadcastMessage('');
+      window.Telegram?.WebApp?.showAlert("Broadcast message sent to all users! 📩");
+    } catch (e) { console.error(e) }
   };
 
-  const filteredUsers = MOCK_USERS.filter(user => {
+  const filteredUsers = adminUsers.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-      user.username.toLowerCase().includes(userSearchQuery.toLowerCase());
+      (user.username && user.username.toLowerCase().includes(userSearchQuery.toLowerCase()));
     const matchesFilter = userFilter === 'All' || user.status === userFilter;
     return matchesSearch && matchesFilter;
   });
 
-  const handleGeneratePromo = () => {
+  const handleGeneratePromo = async () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     for (let i = 0; i < 8; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
 
-    const newPromo = {
-      id: Date.now(),
-      code,
-      days: promoForm.days,
-      maxUses: promoForm.maxUses,
-      uses: 0
-    };
-
-    setPromoCodes([newPromo, ...promoCodes]);
-    addAuditLog(`Generated promo code: ${code} (${promoForm.days} days)`, 'admin');
-    window.Telegram.WebApp.showAlert(`Promo code ${code} generated!`);
+    try {
+      await fetch(`${API_BASE}/admin/promo`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ code, days: promoForm.days, maxUses: promoForm.maxUses })
+      });
+      const promos = await fetch(`${API_BASE}/admin/promo`, { headers: getHeaders() }).then(r => r.json());
+      setPromoCodes(promos);
+      window.Telegram?.WebApp?.showAlert(`Promo code ${code} generated!`);
+    } catch (e) { console.error(e) }
   };
 
-  const handleRedeemPromo = () => {
+  const handleRedeemPromo = async () => {
     const codeToRedeem = promoInput.trim().toUpperCase();
-    const foundCode = promoCodes.find(c => c.code === codeToRedeem);
-
-    if (!foundCode) {
-      window.Telegram.WebApp.showAlert("Invalid promo code!");
-      return;
+    try {
+      const res = await fetch(`${API_BASE}/user/promo/redeem`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ code: codeToRedeem })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProExpiration(data.proExpiration);
+        setIsPro(true);
+        setPromoInput('');
+        window.Telegram?.WebApp?.showAlert(`Success! You've received ${data.days} days of Pro status! 🚀`);
+      } else {
+        window.Telegram?.WebApp?.showAlert(data.error || "Invalid promo code!");
+      }
+    } catch (e) {
+      window.Telegram?.WebApp?.showAlert("Error redeeming code.");
     }
-
-    if (foundCode.uses >= foundCode.maxUses) {
-      window.Telegram.WebApp.showAlert("This promo code has reached its maximum uses!");
-      return;
-    }
-
-    // Grant Pro status
-    const expDate = new Date();
-    expDate.setDate(expDate.getDate() + foundCode.days);
-    setProExpiration(expDate.toISOString());
-    setIsPro(true);
-
-    // Update usage
-    setPromoCodes(promoCodes.map(c =>
-      c.code === codeToRedeem ? { ...c, uses: c.uses + 1 } : c
-    ));
-
-    setPromoInput('');
-    addAuditLog(`User redeemed promo code: ${codeToRedeem}`, 'promo');
-    window.Telegram.WebApp.showAlert(`Success! You've received ${foundCode.days} days of Pro status! 🚀`);
   };
 
   const handleDelete = (id) => {
@@ -940,6 +891,23 @@ export default function App() {
                 </div>
               </div>
 
+              {isAdmin && (
+                <div>
+                  <p className="opacity-40 text-xs font-bold tracking-widest mb-3 px-2 text-amber-500">ADMINISTRATION</p>
+                  <div className={`rounded-2xl overflow-hidden border ${isDarkMode ? 'bg-black border-white/10' : 'bg-white border-black/5 shadow-sm'}`}>
+                    <button onClick={() => navigate('admin')} className="w-full p-4 flex items-center gap-4 text-left hover:bg-gray-500/5 transition-colors">
+                      <div className={`p-2 rounded-lg border ${isDarkMode ? 'bg-black border-amber-500/30 text-amber-500' : 'bg-white border-amber-500/20 text-amber-600'}`}>
+                        <ShieldCheck size={20} />
+                      </div>
+                      <div>
+                        <div className="font-bold text-amber-500">Admin Panel</div>
+                        <div className="text-xs opacity-50">Manage users and promo codes</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <p className="opacity-40 text-xs font-bold tracking-widest mb-3 px-2">DATA MANAGEMENT</p>
                 <div className={`rounded-2xl overflow-hidden border ${isDarkMode ? 'bg-black border-white/10' : 'bg-white border-black/5 shadow-sm'}`}>
@@ -974,7 +942,7 @@ export default function App() {
                   <div className={`flex items-center gap-2 mb-2 ${isDarkMode ? 'text-white' : 'text-black'}`}>
                     <BarChart3 size={16} /> <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">Revenue</span>
                   </div>
-                  <div className="text-2xl font-black">${ADMIN_STATS.totalRevenue.toLocaleString()}</div>
+                  <div className="text-2xl font-black">${adminStats.totalRevenue.toLocaleString()}</div>
                   <div className={`text-[10px] font-bold flex items-center gap-0.5 mt-1 ${isDarkMode ? 'text-white/60' : 'text-black/60'}`}>
                     <TrendingUp size={10} /> +12.4%
                   </div>
@@ -986,7 +954,7 @@ export default function App() {
                   <div className="flex items-center gap-2 mb-2 text-amber-400">
                     <Star size={16} /> <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">Predicted</span>
                   </div>
-                  <div className="text-2xl font-black">${ADMIN_STATS.predictedRevenue.toLocaleString()}</div>
+                  <div className="text-2xl font-black">${adminStats.predictedRevenue.toLocaleString()}</div>
                   <div className="text-[10px] opacity-40 font-bold mt-1">Forecast +28%</div>
                 </div>
               </div>
