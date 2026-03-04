@@ -65,7 +65,8 @@ const GrainFilter = () => (
 );
 
 // --- UTILITIES ---
-const API_BASE = 'http://localhost:3001/api/v1';
+// Для Render: укажите URL вашего бекенда в переменной окружения VITE_API_URL
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/v1';
 
 const getHeaders = () => {
   return {
@@ -128,6 +129,8 @@ export default function App() {
           if (data.role === 'admin' || data.user?.id === 123456789) {
             setIsAdmin(true);
           }
+        } else {
+          console.error('Initial load failed with status:', res.status);
         }
 
         const bRes = await fetch(`${API_BASE}/broadcast`, { headers: getHeaders() });
@@ -136,7 +139,11 @@ export default function App() {
           if (bData.broadcast) setActiveBroadcast(bData.broadcast);
         }
       } catch (e) {
-        console.error('Failed to load initial data:', e);
+        console.error('Failed to connect to backend at:', API_BASE, e);
+        // Не показываем ошибку если мы в режиме разработки без бекенда
+        if (window.Telegram?.WebApp?.initData) {
+          window.Telegram?.WebApp?.showAlert(`Connection Error: Could not reach backend at ${API_BASE}. Make sure your server is running and API_BASE is correct.`);
+        }
       }
     };
 
